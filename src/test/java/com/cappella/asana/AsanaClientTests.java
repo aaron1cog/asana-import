@@ -34,12 +34,6 @@ class AsanaClientTests {
         this.problems = new Problems();
     }
 
-    @AfterEach
-    private void afterTest(){
-        // FIXME - this isn't necessary. JUnit creates a new instance of this class for each test method it runs.
-        this.problems.clear();
-    }
-
     @Test
     void testInsertTasks() {
         List<TaskData> tasks = getInitialTasks();

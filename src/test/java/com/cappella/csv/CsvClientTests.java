@@ -30,12 +30,6 @@ class CsvClientTests {
                 this.problems = new Problems();
         }
 
-        @AfterEach
-        private void afterTest(){
-                // FIXME - this isn't necessary. JUnit creates a new instance of this class for each test method it runs.
-                this.problems.clear();
-        }
-        
         @Test
         public void testDependencyInjectionWorks() {
                 assertNotNull(csv);
