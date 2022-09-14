@@ -1,43 +1,42 @@
 package com.cappella.asana;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Properties;
-
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import com.cappella.model.Problems;
 import com.cappella.model.SubTask;
 import com.cappella.model.TaskData;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.test.context.SpringBootTest;
 
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+
+@SpringBootTest
 class AsanaClientTests {
 
     private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private static final String ASANA_TOKEN = "asana.token";
-    private static final String ASANA_WORKSPACE = "asana.workspace.name";
-    private static final String ASANA_PROJECT = "asana.project.name";
-
+    @Value("${asana.workspace.name}")
+    private String workspaceName;
+    @Value("${asana.project.name}")
+    private String projectName;
+    @Autowired
+    private AsanaClient asana;
+    
     private final Problems problems;
-    private final Properties prop;
-    private final AsanaClient asana;
 
     public AsanaClientTests(){
         this.problems = new Problems();
-        this.prop = getProperties();
-        this.asana = new AsanaClient(this.prop.getProperty(ASANA_TOKEN));
     }
 
     @AfterEach
     private void afterTest(){
+        // TODO - this isn't necessary. JUnit creates a new instance of this class for each test method it runs.
         this.problems.clear();
     }
 
@@ -45,8 +44,7 @@ class AsanaClientTests {
     void testInsertTasks() {
         List<TaskData> tasks = getInitialTasks();
         // insert
-        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
-                prop.getProperty(ASANA_PROJECT), tasks, problems);
+        this.asana.updateOrInsertGrantTasks(workspaceName, projectName, tasks, problems);
         verifyTasks(tasks);
         Assertions.assertTrue(problems.getErrors().isEmpty());
         Assertions.assertTrue(problems.getWarnings().containsKey(Problems.WARNING_TASKDATA_MISSING_NAME));
@@ -58,12 +56,10 @@ class AsanaClientTests {
     void testUpdateTasks() {
         List<TaskData> tasks = getInitialTasks();
         // insert
-        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
-                prop.getProperty(ASANA_PROJECT), tasks, problems);
+        this.asana.updateOrInsertGrantTasks(workspaceName, projectName, tasks, problems);
         // update
         modifyTasks(tasks);
-        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
-                prop.getProperty(ASANA_PROJECT), tasks, problems);
+        this.asana.updateOrInsertGrantTasks(workspaceName, projectName, tasks, problems);
         verifyTasks(tasks);
         Assertions.assertTrue(problems.getErrors().isEmpty());
         Assertions.assertTrue(problems.getWarnings().containsKey(Problems.WARNING_TASKDATA_MISSING_NAME));
@@ -75,52 +71,20 @@ class AsanaClientTests {
     void testBadToken() {
         // don't use this.asana because want to test an invalid token
         AsanaClient asanaClient = new AsanaClient("flubber");
-        asanaClient.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
-                prop.getProperty(ASANA_PROJECT), getInitialTasks(), problems);
+        asanaClient.updateOrInsertGrantTasks(workspaceName, projectName, getInitialTasks(), problems);
         Assertions.assertTrue(problems.getErrors().containsKey(Problems.ERROR_FROM_ASANA));
     }
 
     @Test
     void testBadWorkspace() {
-        this.asana.updateOrInsertGrantTasks(prop.getProperty("flubber"),
-                prop.getProperty(ASANA_PROJECT), getInitialTasks(), problems);
+        this.asana.updateOrInsertGrantTasks("I LIKE MONKEYS", projectName, getInitialTasks(), problems);
         Assertions.assertTrue(problems.getErrors().containsKey(Problems.ERROR_NO_WORKSPACE));
     }
 
     @Test
     void testBadProject() {
-        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
-                prop.getProperty("flubber"), getInitialTasks(), problems);
+        this.asana.updateOrInsertGrantTasks(workspaceName, "I LIKE MONKEYS", getInitialTasks(), problems);
         Assertions.assertTrue(problems.getErrors().containsKey(Problems.ERROR_PROJECT_NOT_IN_WORKSPACE));
-    }
-
-    /**
-     * currently unable to get the property file vai spring methods
-     * 
-     * @Configuration
-     *                @TestPropertySource("classpath:private/asana.properties")
-     * 
-     * @Autowired
-     *            public Environment env;
-     * 
-     *            @Value("${asana.token}")
-     *            String asanaToken;
-     * 
-     *            so using the 'old fashioned' classload, inputstream method
-     * 
-     * @return
-     */
-    Properties getProperties() {
-        ClassLoader classloader = this.getClass().getClassLoader();
-        InputStream is = classloader.getResourceAsStream("private/asana.properties");
-        Assertions.assertTrue((is != null), "unable to load private/asana.properties");
-        Properties prop = new Properties();
-        try {
-            prop.load(is);
-        } catch (IOException e) {
-            Assertions.fail("IOException trying load properties from private/asana.properties ", e);
-        }
-        return prop;
     }
 
     /**
