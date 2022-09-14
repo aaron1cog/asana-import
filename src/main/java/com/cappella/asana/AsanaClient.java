@@ -9,6 +9,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
 import com.asana.Client;
 import com.asana.models.Project;
@@ -22,89 +23,90 @@ import com.asana.requests.ItemRequest;
 import com.cappella.model.Problems;
 import com.cappella.model.TaskData;
 import com.google.gson.JsonElement;
-
+ 
+@Service
+/**
+ * This class handles the communication with Asana.
+ * It currently uses a Personal Access Token 
+ * https://developers.asana.com/docs/personal-access-token
+ * The workspace name and project name must be valid for the Asana workspace
+ * or communication will fail.
+ * 
+ */
 public class AsanaClient {
 
-    final Logger LOGGER = LoggerFactory.getLogger(getClass());
+    private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
-    private String personalAccessToken;
-    private Client client;
+    private static final String ASANA_PRETTY = "pretty";
+    private static final String ASANA_NAME = "name";
+    private static final String ASANA_DUE_ON = "due_on";
+    private static final String ASANA_SECTION = "section";
+    private static final String ASANA_TASK = "task";
+    private static final String ASANA_WORKSPACE = "workspace";
+    private static final String ASANA_PROJECT = "project";
+
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd",
+    Locale.ENGLISH);
+
+    private final Client client;
 
     // TODO
+    // * handle pagination
     // * add subtasks
     // * update subtasks
-    // * review exception handling and if Problems should be passed in
-    // * clean up logger messages
+    // * once Description is added to TaskData need to update/insert it here
 
     /**
-     * 
+     * The personalAccessToken must be a valid token or any communication to 
+     * Asana will fail.
      * @param personalAccessToken
-     * @param workspace
      */
-    public AsanaClient(String accessToken) {
-        personalAccessToken = accessToken;
+    public AsanaClient(String personalAccessToken) {
+        client = Client.accessToken(personalAccessToken);
     }
 
     /**
+     * WorkspaceName and ProjectName must be valid for the Asana workspace
+     * or communication to Asana will fail.
+     * 
+     * Tasks must not be null and each TaskData object in it must have a name
+     * at the very least or no data will be sent to Asana.
+     * 
+     * Problems is a list of all warnings and errors encountered during communication
+     * with Asana.
+     * 
+     * @param workspaceName
      * @param projectName
      * @param tasks
      * @param problems
      */
-    public void insertOrUpdateGrantTasks(String workspaceName, String projectName, List<TaskData> tasks,
+    public void updateOrInsertGrantTasks(String workspaceName, String projectName, List<TaskData> tasks,
             Problems problems) {
         // TODO - ensure all parameters are not null
-        client = Client.accessToken(personalAccessToken);
         Workspace workspace = getWorkspace(workspaceName, problems);
         if (workspace != null) {
             Project project = getProject(workspace, projectName, problems);
             if (project != null) {
-                List<Task> projectTasks = getProjectTasks(project, problems);
-                HashMap<String, Task> taskMap = null;
-                if (projectTasks != null) {
-                    taskMap = new HashMap<String, Task>();
-                    for (Task temp : projectTasks) {
-                        taskMap.put(temp.name, temp);
-                    }
-                }
-                HashMap<String, Section> sectionMap = getSectionMap(project.gid, problems);
-                for (TaskData taskData : tasks) {
-                    // the only requirement for tasks is that they must have a name
-                    if (taskData.getName() != null) {
-                        if (taskMap != null && taskMap.containsKey(taskData.getName())) {
-                            Task existingTask = taskMap.get(taskData.getName());
-                            taskData.setAsanaData(existingTask);
-                            updateTask(project, taskData, existingTask, sectionMap, problems);
-                        } else {
-                            insertTask(workspace, project, taskData, sectionMap, problems);
-                        }
-                    } else {
-                        problems.addWarning(Problems.WARNING_TASKDATA_MISSING_NAME, null);
-
-                    }
-                }
+                updateOrInsertTasks(workspace, project, tasks, problems);
             }
         }
     }
 
-    /**
-     * @param workspaceName
-     * @param problems
-     * @return Workspace
-     */
     Workspace getWorkspace(String workspaceName, Problems problems) {
         Workspace workspace = null;
         try {
             List<Workspace> workspaces = client.workspaces.getWorkspaces()
-                    .option("pretty", true)
+                    .option(ASANA_PRETTY, true)
                     .execute();
             for (Workspace temp : workspaces) {
                 if (temp.name.equals(workspaceName)) {
                     workspace = temp;
-                    break;
+                    return workspace;
                 }
             }
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error getting workspace " + e.toString());
         }
         if (workspace == null) {
             problems.addError(Problems.ERROR_NO_WORKSPACE, "Workspace = " + workspaceName);
@@ -112,17 +114,11 @@ public class AsanaClient {
         return workspace;
     }
 
-    /**
-     * @param workspace
-     * @param projectName
-     * @param problems
-     * @return Project
-     */
     Project getProject(Workspace workspace, String projectName, Problems problems) {
         Project project = null;
         try {
             List<Project> projects = client.projects.getProjects(false, null, workspace.gid)
-                    .option("pretty", true)
+                    .option(ASANA_PRETTY, true)
                     .execute();
             for (Project temp : projects) {
                 if (temp.name.equals(projectName)) {
@@ -132,6 +128,7 @@ public class AsanaClient {
             }
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error getting project " + e.toString());
         }
         if (project == null) {
             problems.addError(Problems.ERROR_PROJECT_NOT_IN_WORKSPACE, "Workspace = " + workspace.name
@@ -141,35 +138,60 @@ public class AsanaClient {
     }
 
     /**
+     * The flow for updating or inserting is:
+     * 1 - Get the list of tasks that exist in Asana. Asana only returns a list.
+     * 2 - Put the list from Asana into a map so it is easy to see if the 
+     *     tasks passed in are existing and so should be updated.
+     * 3 - Iterate over the list of tasks passed in.
+     *       a. Ensure the task has a name.  Without a name it is malformed and must be ignored.
+     *       b. If it exists in the map from Asana then update it.
+     *       c. Else insert it.
+     * 
+     * @param workspace
      * @param project
+     * @param tasks
      * @param problems
-     * @return List<Task>
      */
+    void updateOrInsertTasks(Workspace workspace, Project project, List<TaskData> tasks, Problems problems){
+        List<Task> projectTasks = getProjectTasks(project, problems);
+        Map<String, Task> taskMap = null;
+        if (projectTasks != null) {
+            taskMap = new HashMap<>();
+            for (Task temp : projectTasks) {
+                taskMap.put(temp.name, temp);
+            }
+        }
+        Map<String, Section> sectionMap = getSectionMap(project.gid, problems);
+        for (TaskData taskData : tasks) {
+            // the only requirement for tasks is that they must have a name
+            if (taskData.getName() != null) {
+                updateOrInsertTask(workspace, project, sectionMap, taskMap, taskData, problems);
+            } else {
+                problems.addWarning(Problems.WARNING_TASKDATA_MISSING_NAME, null);
+
+            }
+        }
+    }
+
     List<Task> getProjectTasks(Project project, Problems problems) {
         List<Task> projectTasks = null;
         try {
             // get the existing tasks from Asana
             // result.nextPage.offset is offsset for pagination
             CollectionRequest<Task> request = client.tasks.getTasksForProject(project.gid, null)
-                    .option("pretty", true);
+                    .option(ASANA_PRETTY, true);
             ResultBodyCollection<Task> result = request.executeRaw();
             projectTasks = result.data;
             if (result.nextPage != null) {
-                // need to handle pagination if nextPage is not null
+                // TODO need to handle pagination if nextPage is not null
             }
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error getting project tasks " + e.toString());
         }
         return projectTasks;
     }
 
-    /**
-     * @param sectionName
-     * @param sectionMap
-     * @param projectGid
-     * @param problems
-     * @return Section
-     */
     Section getOrCreateSectionGid(String sectionName, Map<String, Section> sectionMap, String projectGid,
             Problems problems) {
         // in the case that the section associated with this task does not yet exist
@@ -182,8 +204,8 @@ public class AsanaClient {
                     section = existingSection;
                 } else {
                     Section newSection = client.sections.createSectionForProject(projectGid)
-                            .data("name", sectionName)
-                            .option("pretty", true)
+                            .data(ASANA_NAME, sectionName)
+                            .option(ASANA_PRETTY, true)
                             .execute();
                     sectionMap.put(sectionName, newSection);
                     section = newSection;
@@ -191,49 +213,48 @@ public class AsanaClient {
             }
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error setting section " + e.toString());
         }
         return section;
     }
 
-    /**
-     * @param projectGid
-     * @param problems
-     * @return HashMap<String, Section>
-     */
-    HashMap<String, Section> getSectionMap(String projectGid, Problems problems) {
+    Map<String, Section> getSectionMap(String projectGid, Problems problems) {
         // Create map of sections since we don't want to create new ones if they already
         // exist.
-        HashMap<String, Section> sectionMap = new HashMap<String, Section>();
+        Map<String, Section> sectionMap = new HashMap<>();
         try {
             List<Section> sections = client.sections.getSectionsForProject(projectGid)
-                    .option("pretty", true)
+                    .option(ASANA_PRETTY, true)
                     .execute();
             for (Section section : sections) {
                 sectionMap.put(section.name, section);
             }
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error getting sections for map " + e.toString());
         }
         return sectionMap;
     }
 
-    /**
-     * @param project
-     * @param taskData
-     * @param existingTask
-     * @param sectionMap
-     * @param problems
-     */
+    void updateOrInsertTask(Workspace workspace, Project project, Map<String, Section> sectionMap, 
+                            Map<String, Task> taskMap, TaskData taskData, Problems problems){
+        if (taskMap != null && taskMap.containsKey(taskData.getName())) {
+            Task existingTask = taskMap.get(taskData.getName());
+            taskData.setAsanaData(existingTask);
+            updateTask(project, taskData, existingTask, sectionMap, problems);
+        } else {
+            insertTask(workspace, project, taskData, sectionMap, problems);
+        }
+    }
+
     void updateTask(Project project, TaskData taskData, Task existingTask, Map<String, Section> sectionMap,
             Problems problems) {
         try {
             // TODO - add description
             if (taskData.getDueDate() != null) {
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd",
-                        Locale.ENGLISH);
                 Task updateTask = client.tasks.updateTask(existingTask.gid)
-                        .data("due_on", taskData.getDueDate().format(formatter))
-                        .option("pretty", true)
+                        .data(ASANA_DUE_ON, taskData.getDueDate().format(DATE_FORMATTER))
+                        .option(ASANA_PRETTY, true)
                         .execute();
                 taskData.setAsanaData(updateTask);
             }
@@ -242,8 +263,8 @@ public class AsanaClient {
             Section section = getOrCreateSectionGid(taskData.getSection(), sectionMap, project.gid, problems);
             if (section != null) {
                 JsonElement addTaskToSectionResult = client.sections.addTaskForSection(section.gid)
-                        .data("task", existingTask.gid)
-                        .option("pretty", true)
+                        .data(ASANA_TASK, existingTask.gid)
+                        .option(ASANA_PRETTY, true)
                         .execute();
                 taskData.setAsanaSection(section.name);
             }
@@ -258,30 +279,22 @@ public class AsanaClient {
             // else create
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error updating task " + e.toString());
         }
     }
 
-    /**
-     * @param workspace
-     * @param project
-     * @param taskData
-     * @param sectionMap
-     * @param problems
-     */
     void insertTask(Workspace workspace, Project project, TaskData taskData, Map<String, Section> sectionMap,
             Problems problems) {
         try {
             // create the task
             // TODO - need to check that due_on isn't null
             // TODO - need to add description
-            DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd",
-                    Locale.ENGLISH);
             ItemRequest<Task> newTaskRequest = client.tasks.createTask()
-                    .data("name", taskData.getName())
-                    .data("workspace", workspace.gid)
-                    .option("pretty", true);
+                    .data(ASANA_NAME, taskData.getName())
+                    .data(ASANA_WORKSPACE, workspace.gid)
+                    .option(ASANA_PRETTY, true);
             if (taskData.getDueDate() != null) {
-                newTaskRequest = newTaskRequest.data("due_on", taskData.getDueDate().format(formatter));
+                newTaskRequest = newTaskRequest.data(ASANA_DUE_ON, taskData.getDueDate().format(DATE_FORMATTER));
             }
             ResultBody<Task> newTaskResult = newTaskRequest.executeRaw();
             Task newTask = newTaskResult.data;
@@ -289,24 +302,22 @@ public class AsanaClient {
             Section section = getOrCreateSectionGid(taskData.getSection(), sectionMap, project.gid, problems);
             // set the project
             ItemRequest<JsonElement> requestAddProjectForTask = client.tasks.addProjectForTask(newTask.gid)
-                    .data("project", project.gid)
-                    .option("pretty", true);
+                    .data(ASANA_PROJECT, project.gid)
+                    .option(ASANA_PRETTY, true);
             // determine if there is a section and if so add it as part of this call
             if (section != null) {
                 // add section to the task
-                requestAddProjectForTask = requestAddProjectForTask.data("section", section.gid);
+                requestAddProjectForTask = requestAddProjectForTask.data(ASANA_SECTION, section.gid);
                 taskData.setAsanaSection(section.name);
             }
             JsonElement json = requestAddProjectForTask.execute();
             // subtasks are separate calls
         } catch (Exception e) {
             problems.addError(Problems.ERROR_FROM_ASANA, e.toString());
+            LOGGER.debug("error inserting task " + e.toString());
         }
     }
 
-    /**
-     * @param tasks
-     */
     void deleteTasks(List<TaskData> tasks) {
         for (TaskData task : tasks) {
             // to account for negative tests we should only delete tasks that are sure to
@@ -314,11 +325,12 @@ public class AsanaClient {
             if (task.getAsanaData() != null) {
                 try {
                     JsonElement result = client.tasks.deleteTask(task.getAsanaData().gid)
-                            .option("pretty", true)
+                            .option(ASANA_PRETTY, true)
                             .execute();
                     LOGGER.debug("deleted task " + task.getName() + "  " + result.toString());
                 } catch (Exception e) {
                     LOGGER.debug(e.toString());
+                    LOGGER.debug("error deleting task " + e.toString());
                 }
             }
         }

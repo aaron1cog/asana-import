@@ -16,47 +16,29 @@ public class TaskData {
     private String asanaSection;
 
     public TaskData() {
-        subTasks = new ArrayList<SubTask>();
+        subTasks = new ArrayList<>();
     }
 
-    /**
-     * @param newName
-     */
     public void setName(String newName) {
         name = newName;
     }
 
-    /**
-     * @return String
-     */
     public String getName() {
         return name;
     }
 
-    /**
-     * @param newDate
-     */
     public void setDueDate(LocalDate newDate) {
         dueDate = newDate;
     }
 
-    /**
-     * @return LocalDate
-     */
     public LocalDate getDueDate() {
         return dueDate;
     }
 
-    /**
-     * @param newSection
-     */
     public void setSection(String newSection) {
         section = newSection;
     }
 
-    /**
-     * @return String
-     */
     public String getSection() {
         return section;
     }
@@ -65,37 +47,22 @@ public class TaskData {
         asanaSection = newSection;
     }
 
-    /**
-     * @return String
-     */
     public String getAsanaSection() {
         return asanaSection;
     }
 
-    /**
-     * @param subTask
-     */
     public void addSubTask(SubTask subTask) {
         subTasks.add(subTask);
     }
 
-    /**
-     * @return List<SubTask>
-     */
     public List<SubTask> getSubTasks() {
         return subTasks;
     }
 
-    /**
-     * @param data
-     */
     public void setAsanaData(Task data) {
         asanaData = data;
     }
 
-    /**
-     * @return Task
-     */
     public Task getAsanaData() {
         return asanaData;
     }

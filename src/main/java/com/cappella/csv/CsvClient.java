@@ -14,41 +14,53 @@ import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.cappella.model.Problems;
 import com.cappella.model.SubTask;
 import com.cappella.model.TaskData;
 
+@Service
+/**
+ * This class parses CSV files from Instrumentl to be loaded into Asana.
+ * The CSV file must have a first record/row of headers.
+ * The header "Opportunity name" (GRANT_HEADER_TASK_NAME) must exist.
+ * "Opportunity name" becomes the name of the task in Asana.
+ * "Funder Full proposal deadline" is the due date for the task if it exists.
+ * "Status" is the section for the task if it exists.
+ * "Next task description" is a subtask for the task if it exists.
+ * "Next task deadline" is the due date for the subtask if it exists.
+ * TODO - need to determine if what fields will become the description for the task
+ */
 public class CsvClient {
 
-    public static final String TYPE = "text/csv";
+    private static final String TYPE = "text/csv";
 
-    public static final String GRANT_HEADER_TASK_NAME = "Opportunity name";
-    public static final String GRANT_HEADER_DUE_DATE = "Funder Full proposal deadline";
-    public static final String GRANT_HEADER_SECTION = "Status";
-    public static final String GRANT_HEADER_SUBTASK_NAME = "Next task description";
-    public static final String GRANT_HEADER_SUBTASK_DUE_DATE = "Next task deadline";
+    public static final String GRANT_HEADER_TASK_NAME = "Opportunity name"; // used in Problems
+    private static final String GRANT_HEADER_DUE_DATE = "Funder Full proposal deadline";
+    private static final String GRANT_HEADER_SECTION = "Status";
+    private static final String GRANT_HEADER_SUBTASK_NAME = "Next task description";
+    private static final String GRANT_HEADER_SUBTASK_DUE_DATE = "Next task deadline";
 
-    final Logger LOGGER = LoggerFactory.getLogger(getClass());
+    static final DateTimeFormatter TASK_DATE_FORMATTER = DateTimeFormatter.ofPattern("LLL d, yyyy", Locale.ENGLISH);
+    static final DateTimeFormatter SUB_TASK_DATE_FORMATTER = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.ENGLISH);
+
+    private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
     /**
      * @param file
      * @return boolean
      */
     public boolean hasCSVFormat(MultipartFile file) {
-        if (!TYPE.equals(file.getContentType())) {
-            return false;
-        }
-        return true;
+        return TYPE.equals(file.getContentType());
     }
 
     /**
      * CSV file must have a first record/row of headers.
      * The header "Opportunity name" (GRANT_HEADER_TASK_NAME) must exist.
-     * Will return a null List if either of these conditions are not met or
-     * there are errors parsing the headers.
-     * List my be empty if the header is present but no valid rows are parsed.
+     * List will be null if there are problems parsing the header.
+     * List will empty if the header is present but no valid rows are parsed.
      * Any errors encountered will be contained in the Problems.
      * 
      * @param is
@@ -66,7 +78,7 @@ public class CsvClient {
                 // log error that the task name header does not exist in the csv file
                 problems.addError(Problems.ERROR_MISSING_GRANT_TASK_NAME_HEADER, null);
             } else {
-                tasks = new ArrayList<TaskData>();
+                tasks = new ArrayList<>();
                 for (CSVRecord csvRecord : csvRecords) {
                     TaskData task = parseTask(csvRecord, problems);
                     if (task != null) {
@@ -152,8 +164,7 @@ public class CsvClient {
         LocalDate dueDate = null;
         if (!value.isEmpty()) {
             try { // if there are date parse errors catch them and keep processing
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("LLL d, yyyy", Locale.ENGLISH);
-                dueDate = LocalDate.parse(value, formatter);
+                dueDate = LocalDate.parse(value, TASK_DATE_FORMATTER);
             } catch (Exception e) {
                 problems.addError(Problems.ERROR_PARSING_TASK_DUE_DATE, e.toString());
             }
@@ -202,8 +213,7 @@ public class CsvClient {
             try { // if there are date parse errors catch them and keep processing
                 String[] splitStrings = value.split("-");
                 subTask.setName(subTask.getName().concat(" " + splitStrings[0]));
-                DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy", Locale.ENGLISH);
-                dueDate = LocalDate.parse(splitStrings[1], formatter);
+                dueDate = LocalDate.parse(splitStrings[1], SUB_TASK_DATE_FORMATTER);
                 // set subtask due date
                 subTask.setDueDate(dueDate);
             } catch (Exception e) {

@@ -20,41 +20,32 @@ public class Problems {
     public static final String ERROR_NO_WORKSPACE = "The workspace does not exist.";
     public static final String WARNING_TASKDATA_MISSING_NAME = "Warning - task data missing a name so it was skipped";
 
-    private Map<String, String> errors;
-    private Map<String, String> warnings;
+    private final Map<String, String> errors;
+    private final Map<String, String> warnings;
 
     public Problems() {
-        errors = new HashMap<String, String>();
-        warnings = new HashMap<String, String>();
+        errors = new HashMap<>();
+        warnings = new HashMap<>();
     }
 
-    /**
-     * @param key
-     * @param value
-     */
     public void addError(String key, String value) {
         errors.put(key, value);
     }
 
-    /**
-     * @param key
-     * @param value
-     */
     public void addWarning(String key, String value) {
         warnings.put(key, value);
     }
 
-    /**
-     * @return Map<String, String>
-     */
     public Map<String, String> getErrors() {
         return Collections.unmodifiableMap(errors);
     }
 
-    /**
-     * @return Map<String, String>
-     */
     public Map<String, String> getWarnings() {
         return Collections.unmodifiableMap(warnings);
+    }
+
+    public void clear(){
+        errors.clear();
+        warnings.clear();
     }
 }

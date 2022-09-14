@@ -4,9 +4,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,77 +20,77 @@ import com.cappella.model.TaskData;
 
 class AsanaClientTests {
 
-    final Logger LOGGER = LoggerFactory.getLogger(getClass());
+    private final Logger LOGGER = LoggerFactory.getLogger(getClass());
+
+    private static final String ASANA_TOKEN = "asana.token";
+    private static final String ASANA_WORKSPACE = "asana.workspace.name";
+    private static final String ASANA_PROJECT = "asana.project.name";
+
+    private final Problems problems;
+    private final Properties prop;
+    private final AsanaClient asana;
+
+    public AsanaClientTests(){
+        this.problems = new Problems();
+        this.prop = getProperties();
+        this.asana = new AsanaClient(this.prop.getProperty(ASANA_TOKEN));
+    }
+
+    @AfterEach
+    private void afterTest(){
+        this.problems.clear();
+    }
 
     @Test
     void testInsertTasks() {
-        Properties prop = getProperties();
-        AsanaClient asana = new AsanaClient(prop.getProperty("asana.token"));
-        ArrayList<TaskData> tasks = getInitialTasks();
-        Problems problems = new Problems();
+        List<TaskData> tasks = getInitialTasks();
         // insert
-        asana.insertOrUpdateGrantTasks(prop.getProperty("asana.workspace.name"),
-                prop.getProperty("asana.project.name"), tasks, problems);
-        // cleanup the tasks
-        asana.deleteTasks(tasks);
+        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
+                prop.getProperty(ASANA_PROJECT), tasks, problems);
         verifyTasks(tasks);
         Assertions.assertTrue(problems.getErrors().isEmpty());
         Assertions.assertTrue(problems.getWarnings().containsKey(Problems.WARNING_TASKDATA_MISSING_NAME));
+        // delete/cleanup the test tasks added to Asana 
+        this.asana.deleteTasks(tasks);
     }
 
     @Test
     void testUpdateTasks() {
-        Properties prop = getProperties();
-        AsanaClient asana = new AsanaClient(prop.getProperty("asana.token"));
-        ArrayList<TaskData> tasks = getInitialTasks();
-        Problems problems = new Problems();
+        List<TaskData> tasks = getInitialTasks();
         // insert
-        asana.insertOrUpdateGrantTasks(prop.getProperty("asana.workspace.name"),
-                prop.getProperty("asana.project.name"), tasks, problems);
+        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
+                prop.getProperty(ASANA_PROJECT), tasks, problems);
         // update
         modifyTasks(tasks);
-        asana.insertOrUpdateGrantTasks(prop.getProperty("asana.workspace.name"),
-                prop.getProperty("asana.project.name"), tasks, problems);
-        // cleanup the tasks
-        asana.deleteTasks(tasks);
+        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
+                prop.getProperty(ASANA_PROJECT), tasks, problems);
         verifyTasks(tasks);
         Assertions.assertTrue(problems.getErrors().isEmpty());
         Assertions.assertTrue(problems.getWarnings().containsKey(Problems.WARNING_TASKDATA_MISSING_NAME));
+        // delete/cleanup the test tasks added to Asana 
+        this.asana.deleteTasks(tasks);
     }
 
     @Test
     void testBadToken() {
-        Properties prop = getProperties();
-        AsanaClient asana = new AsanaClient("flubber");
-        ArrayList<TaskData> tasks = getInitialTasks();
-        Problems problems = new Problems();
-        // insert
-        asana.insertOrUpdateGrantTasks(prop.getProperty("asana.workspace.name"),
-                prop.getProperty("asana.project.name"), tasks, problems);
+        // don't use this.asana because want to test an invalid token
+        AsanaClient asanaClient = new AsanaClient("flubber");
+        asanaClient.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
+                prop.getProperty(ASANA_PROJECT), getInitialTasks(), problems);
         Assertions.assertTrue(problems.getErrors().containsKey(Problems.ERROR_FROM_ASANA));
     }
 
     @Test
     void testBadWorkspace() {
-        Properties prop = getProperties();
-        AsanaClient asana = new AsanaClient(prop.getProperty("asana.token"));
-        ArrayList<TaskData> tasks = getInitialTasks();
-        Problems problems = new Problems();
-        // insert
-        asana.insertOrUpdateGrantTasks(prop.getProperty("flubber"),
-                prop.getProperty("asana.project.name"), tasks, problems);
+        this.asana.updateOrInsertGrantTasks(prop.getProperty("flubber"),
+                prop.getProperty(ASANA_PROJECT), getInitialTasks(), problems);
         Assertions.assertTrue(problems.getErrors().containsKey(Problems.ERROR_NO_WORKSPACE));
     }
 
     @Test
     void testBadProject() {
-        Properties prop = getProperties();
-        AsanaClient asana = new AsanaClient(prop.getProperty("asana.token"));
-        ArrayList<TaskData> tasks = getInitialTasks();
-        Problems problems = new Problems();
-        // insert
-        asana.insertOrUpdateGrantTasks(prop.getProperty("asana.workspace.name"),
-                prop.getProperty("flubber"), tasks, problems);
+        this.asana.updateOrInsertGrantTasks(prop.getProperty(ASANA_WORKSPACE),
+                prop.getProperty("flubber"), getInitialTasks(), problems);
         Assertions.assertTrue(problems.getErrors().containsKey(Problems.ERROR_PROJECT_NOT_IN_WORKSPACE));
     }
 
@@ -121,10 +124,10 @@ class AsanaClientTests {
     }
 
     /**
-     * @return ArrayList<TaskData>
+     * @return List<TaskData>
      */
-    ArrayList<TaskData> getInitialTasks() {
-        ArrayList<TaskData> tasks = new ArrayList<TaskData>();
+    List<TaskData> getInitialTasks() {
+        List<TaskData> tasks = new ArrayList<>();
         // all fields
         tasks.add(createTaskData("test task name 1", LocalDate.now(), "Submitted",
                 "test subTask 1", LocalDate.now().plusDays(1)));
@@ -177,7 +180,7 @@ class AsanaClientTests {
     /**
      * @param tasks
      */
-    void modifyTasks(ArrayList<TaskData> tasks) {
+    void modifyTasks(List<TaskData> tasks) {
         for (TaskData temp : tasks) {
             if (temp.getDueDate() != null) {
                 temp.setDueDate(temp.getDueDate().plusDays(4L));
@@ -188,20 +191,18 @@ class AsanaClientTests {
     }
 
     /**
+     * To verify that the information was added to Asana
+     * we need to look at the data which was returned from Asana
+     * name, due date, section, subtasks, and description
+     * unfortunately I haven't figured out how to get due_on or description back
+     * from Asana only verifying name and section
      * 
      * @param tasks
      */
-    void verifyTasks(ArrayList<TaskData> tasks) {
-        // To verify that the information was added to Asana
-        // we need to look at the data which was returned from Asana
-        // name, due date, section, subtasks, and description
-        // unfortunately I haven't figured out how to get due_on or description back
-        // from Asana
-        // only verifying name and section
+    void verifyTasks(List<TaskData> tasks) {
         for (TaskData task : tasks) {
             // the only time the names won't match is if the original task has a null name
-            // so
-            // verify that the task.getName() is not null
+            // so verify that the task.getName() is not null
             if (task.getName() != null) {
                 Assertions.assertEquals(task.getName(), task.getAsanaData().name,
                         "Names do not match for " + task.getName() + " != " + task.getAsanaData().name);
