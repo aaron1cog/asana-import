@@ -1,40 +1,46 @@
 package com.cappella.csv;
 
-import java.beans.Transient;
-import java.io.InputStream;
-import java.time.LocalDate;
-import java.util.List;
-import java.util.Locale;
-
+import com.cappella.model.Problems;
+import com.cappella.model.SubTask;
+import com.cappella.model.TaskData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
 
-import org.apache.commons.csv.CSVRecord;
-import com.cappella.model.Problems;
-import com.cappella.model.TaskData;
-import com.cappella.model.SubTask;
+import java.io.InputStream;
+import java.time.LocalDate;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+@SpringBootTest
 class CsvClientTests {
 
         private final Logger LOGGER = LoggerFactory.getLogger(getClass());
 
+        @Autowired
+        private CsvClient csv;
         private final Problems problems;
-        private final CsvClient csv;
 
         public CsvClientTests(){
                 this.problems = new Problems();
-                this.csv = new CsvClient();
         }
 
         @AfterEach
         private void afterTest(){
+                // FIXME - this isn't necessary. JUnit creates a new instance of this class for each test method it runs.
                 this.problems.clear();
         }
-
+        
+        @Test
+        public void testDependencyInjectionWorks() {
+                assertNotNull(csv);
+        }
+        
         @Test
         void testNoHeadersCsvFile() {
                 List<TaskData> grantTasks = parseCsvFile("noHeaders.csv");
